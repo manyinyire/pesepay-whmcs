@@ -1,0 +1,10 @@
+{
+  "name": "azaire-pesepay-whmcs-tests",
+  "private": true,
+  "scripts": {
+    "test:ui": "node --test tests/checkout.test.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "31.0.1"
+  }
+}

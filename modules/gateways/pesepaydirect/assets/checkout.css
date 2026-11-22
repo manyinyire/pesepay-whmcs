@@ -1,0 +1,34 @@
+.ppd { box-sizing: border-box; max-width: 440px; margin: 1rem auto; padding: 18px 20px; border: 1px solid #dce3ec; border-radius: 12px; background: #fff; color: #182638; text-align: left; font: inherit; font-size: 15px; line-height: 1.5; }
+.ppd *, .ppd *::before, .ppd *::after { box-sizing: border-box; }
+.ppd[hidden], .ppd [hidden] { display: none !important; }
+.ppd-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ppd h3 { margin: 0; font-size: 18px; font-weight: 600; color: #182638; }
+.ppd-amount { margin: 0; font-size: 13px; color: #526176; }
+.ppd-amount strong { display: block; font-size: 18px; font-weight: 600; color: #182638; text-align: right; }
+.ppd-status { margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: #f0f5fb; font-size: 13.5px; }
+.ppd-hint, .ppd-reference, .ppd-alt { color: #526176; font-size: 13px; overflow-wrap: anywhere; }
+.ppd-hint { margin: 6px 0 0; }
+.ppd-hint:empty { display: none; }
+.ppd-wallets { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.ppd-wallets legend, .ppd label.ppd-phone-label { display: block; margin: 0 0 6px; padding: 0; font-size: 13.5px; font-weight: 600; color: #182638; border: 0; width: auto; }
+.ppd-wallet-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.ppd-wallet { position: relative; display: flex; align-items: center; justify-content: center; min-height: 44px; margin: 0; padding: 8px 10px; border: 1px solid #afbdcd; border-radius: 8px; background: #fff; font-weight: 600; cursor: pointer; }
+.ppd-wallet input { position: absolute; opacity: 0; pointer-events: none; }
+.ppd-wallet:has(input:checked) { border: 2px solid #124c83; background: #eef4fb; color: #124c83; }
+.ppd-wallet:has(input:focus-visible) { outline: 3px solid #edb13a; outline-offset: 2px; }
+.ppd-single { margin: 0 0 12px; font-weight: 600; }
+.ppd label.ppd-phone-label { margin-top: 0; }
+.ppd input.ppd-phone, .ppd input.ppd-otp-value { display: block; width: 100%; height: 42px; padding: 8px 12px; margin-top: 6px; border: 1px solid #afbdcd; border-radius: 8px; background: #fff; color: #182638; font: inherit; font-weight: 400; }
+.ppd label { display: block; margin: 12px 0 0; font-weight: 600; }
+.ppd button { min-height: 44px; margin: 14px 6px 0 0; padding: 10px 18px; border: 0; border-radius: 8px; background: #124c83; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.ppd button.ppd-pay { width: 100%; margin-right: 0; }
+.ppd button:disabled { opacity: .6; cursor: wait; }
+.ppd :focus-visible { outline: 3px solid #edb13a; outline-offset: 3px; }
+.ppd-alt { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #e6ebf1; }
+.ppd-qr { display: block; max-width: 220px; width: 100%; margin: 12px auto; }
+.ppd-code { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.ppd-loader { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; color: #526176; font-size: 14px; }
+.ppd-spinner { flex: none; width: 22px; height: 22px; border: 3px solid #d6e1ee; border-top-color: #124c83; border-radius: 50%; animation: ppd-spin .8s linear infinite; }
+@keyframes ppd-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ppd-spinner { animation-duration: 2.4s; } }
+@media (max-width: 480px) { .ppd { padding: 16px; } .ppd button { width: 100%; margin-right: 0; } }

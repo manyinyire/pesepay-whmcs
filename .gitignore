@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.test-mysql/
+.sandbox-*.json
+docs/reference/
+*.log
+.env*
