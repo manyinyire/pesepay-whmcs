@@ -2,7 +2,7 @@
 if (!defined('WHMCS')) { http_response_code(403); exit; }
 function pesepayreports_config()
 {
-    return ['name'=>'PesePay Transactions & Reports','description'=>'Transactions, reconciliation visibility and currency-separated reports for PesePay Direct.','version'=>'0.2.0-rc1','author'=>'Azaire','fields'=>[
+    return ['name'=>'PesePay Transactions & Reports','description'=>'Transactions, reconciliation visibility and currency-separated reports for PesePay Direct.','version'=>'0.3.0-rc1','author'=>'Azaire','fields'=>[
         'allowStatusCheck'=>['FriendlyName'=>'Allow provider status checks','Type'=>'yesno','Description'=>'Read-only PesePay checks for admins allowed to access this addon. Never records invoice payments.','Default'=>''],
         'allowExport'=>['FriendlyName'=>'Allow CSV exports','Type'=>'yesno','Description'=>'Export up to 5,000 filtered attempts. Restrict addon access to appropriate admin roles.','Default'=>'on'],
     ]];

@@ -1,125 +1,209 @@
-# PesePay Direct for WHMCS — 0.2.0 release candidate
+# PesePay Direct for WHMCS
 
-A separate WHMCS gateway (`pesepaydirect`) for PesePay's Direct API. Development is local only. Nothing has been uploaded to or activated on clientzone.azaire.co.zw, and no production client records, invoices or settings have been changed.
+A WHMCS payment gateway for [PesePay](https://pesepay.com)'s Direct API, plus an admin reports addon. Clients pay an invoice from their mobile wallet without leaving WHMCS. The invoice is marked paid only after the payment is verified with PesePay.
 
-**Not cleared for production:** local tests pass, but the first real sandbox initiation returned HTTP 500 without a reference. That attempt remains unresolved and was not retried. Complete sandbox and isolated WHMCS staging validation before production deployment. Production deployment requires the owner's explicit approval.
+**Version:** 0.3.0 release candidate.
 
-## Administrator settings
+**Status:** tested end to end on a UAT copy of WHMCS 9.0.7 in **Test mode**. The client pays, PesePay confirms, the invoice is marked Paid and the page reloads. **Not yet tested with live keys.** Do one small real payment per wallet before relying on it (see [Going live](#going-live)).
 
-Activate **PesePay Direct** in the staging WHMCS payment-gateway settings. An administrator enters all credentials in the WHMCS admin area under **Setup > Payment Gateways > Manage Existing Gateways > PesePay Direct**:
+## What's included
 
-- Environment: Sandbox (default) or Production.
-- Sandbox Integration Key and Sandbox Encryption Key.
-- Production Integration Key and Production Encryption Key.
-- Individual enable switches for supported wallet/currency combinations.
+| Path | Purpose |
+|---|---|
+| `modules/gateways/pesepaydirect.php` | Gateway settings and the checkout box on the invoice page |
+| `modules/gateways/pesepaydirect/` | Checkout endpoint, PesePay API client, payment logic, background job, checkout script and styles |
+| `modules/gateways/callback/pesepaydirect.php` | Receives PesePay's result callbacks |
+| `modules/addons/pesepayreports/` | **Addons > PesePay Transactions & Reports** in WHMCS admin |
+| `tests/`, `tools/` | Development tests and a sandbox smoke script. Not needed on the server |
 
-Each key field uses WHMCS's password field type. WHMCS manages credential storage and supplies the configured values to the gateway on the server. Keys are never included in checkout HTML, JavaScript or module logs. The encryption key must contain exactly 32 bytes. When the settings are saved, the module rejects an encryption key of the wrong length, keys containing spaces or line breaks, and a selected environment without both keys; WHMCS then shows the error and does not save. The **Gateway settings** tab of the reports addon shows whether each key is set and valid, without displaying it. Do not configure WHMCS gateway currency conversion: this module uses the invoice's currency and current outstanding balance directly.
+## Requirements
 
-Sandbox payments deliberately do **not** create WHMCS ledger entries or mark real invoices paid. Production and sandbox attempts are separated. Retain the corresponding keys while attempts remain unsettled; changing credentials can prevent reconciliation of earlier payments.
+- WHMCS 8 or later (tested on 9.0.7), PHP 8.1 or later with cURL, OpenSSL and PDO MySQL, and MySQL 5.7+/8.0 or MariaDB.
+- The WHMCS **System URL** must use **https://**. PesePay's callbacks must be able to reach `https://<your-whmcs>/modules/gateways/callback/pesepaydirect.php`.
+- Outbound HTTPS from the server to `api.pesepay.com` (live) and `api.test.sandbox.pesepay.com` (Test mode).
+- A cron job that runs every minute (see step 6 below).
+- PesePay keys: the **integration key** and **encryption key** (32 characters) from your application in the PesePay Merchant Control Panel. The keys on the panel's home page are **test keys** and only work in Test mode.
 
-## Transactions & reports addon
+## Installation
 
-`modules/addons/pesepayreports` adds **Addons > PesePay Transactions & Reports** to the WHMCS admin area. Activate it under **System Settings > Addon Modules** and grant access only to the admin roles that should see payment data.
+These steps fit a DirectAdmin- or cPanel-hosted WHMCS such as clientzone.azaire.co.zw. Adjust the paths for your server.
 
-- **Transactions:** every attempt made through PesePay Direct, filtered by environment, outcome (verified success, failed/declined, pending, needs attention), dates (UTC), wallet, currency, invoice and reference. Each attempt has a detail page linking to its invoice and client.
-- **Reports:** totals per invoice currency, success rates, daily activity and a wallet/status breakdown. Currencies are never added together. Sandbox and production are always reported separately.
-- **Needs attention / Reconciliation:** stale pending payments, uncertain statuses and attempts without a provider reference, across both environments.
-- **Gateway settings:** key status per environment, the active environment and the enabled wallets, with a link to the gateway settings page.
-- **CSV export** (optional, on by default): up to 5,000 filtered attempts, without keys, phone numbers or provider payloads. Spreadsheet formula prefixes are neutralised.
-- **Check status with PesePay** (optional, off by default): a read-only, verified status lookup for one attempt. It never records a payment or changes the attempt.
+### 1. Back up
 
-The addon reads the gateway's `mod_pesepaydirect_attempts` table only. It covers payments made through this module, not older Payzw history. Activation and deactivation never delete records.
+Take a backup of the WHMCS files and database first, for example with DirectAdmin's backup tool. Installing only adds files and one database table, but a backup makes rollback trivial.
+
+### 2. Upload the files
+
+Download the release ZIP (or this repository) and upload **only the `modules/` folder** into the WHMCS root, merging with the existing `modules/` folder. Nothing existing is replaced. These are the new files:
+
+```
+modules/gateways/pesepaydirect.php
+modules/gateways/pesepaydirect/          (whole folder)
+modules/gateways/callback/pesepaydirect.php
+modules/addons/pesepayreports/           (whole folder)
+```
+
+Files should be readable by the web server user, for example 644 for files and 755 for folders.
+
+### 3. Activate the gateway
+
+1. In WHMCS admin, go to **Setup > Payment Gateways** (WHMCS 9: **System Settings > Payment Gateways**), open **All Payment Gateways** and click **PesePay Direct**.
+2. If it isn't listed, which can happen on WHMCS 9 for custom gateways, activate it from the server instead. Use SSH, or a one-off DirectAdmin/cPanel cron job:
+
+   ```sh
+   php /path/to/whmcs/modules/gateways/pesepaydirect/reconcile.php --activate
+   ```
+
+   It then appears under **Manage Existing Gateways**.
+
+### 4. Enter the keys
+
+Under **Manage Existing Gateways > PesePay Direct**:
+
+| Setting | What to enter |
+|---|---|
+| **Test mode** | Leave **off** on the live site. Turn it on only on a test/UAT copy (see [Test mode](#test-mode)). |
+| **Integration key** | The **live** integration key from your PesePay application, or the test key when Test mode is on. |
+| **Encryption key** | The matching 32-character encryption key. |
+| **Wallet switches** | Start with **EcoCash USD** only. Enable the others after a successful small payment with each (see [Going live](#going-live)). |
+
+Click **Save Changes**. If a key is the wrong length or contains spaces, WHMCS shows an error and doesn't save. Key values are stored encrypted by WHMCS and are never shown on any page, written to logs or sent to the browser.
+
+> Enter the keys straight after activating. Until they're set, a client who chooses PesePay sees an error instead of the payment form.
+
+### 5. Create the database table
+
+The module creates its table (`mod_pesepaydirect_attempts`) automatically the first time a client opens the payment box. To create it in advance:
+
+```sh
+php /path/to/whmcs/modules/gateways/pesepaydirect/reconcile.php --install
+```
+
+### 6. Schedule the background check (cron, every minute)
+
+This job confirms payments even if the client closes the page or a PesePay callback is lost. In DirectAdmin, go to **Advanced Features > Cron Jobs** (cPanel: **Cron Jobs**) and add:
+
+```cron
+* * * * * /usr/local/bin/php /path/to/whmcs/modules/gateways/pesepaydirect/reconcile.php >> /home/USER/pesepay-reconcile.log 2>&1
+```
+
+Use the same PHP binary as your WHMCS cron, for example `/usr/local/bin/php` or `/usr/bin/php`, and keep the log **outside** `public_html`. The job never runs twice at once, handles up to 20 payments per run and stops starting new work after about 50 seconds. It is separate from the main WHMCS cron, which stays as it is.
+
+### 7. Activate the reports addon
+
+1. Go to **System Settings > Addon Modules**, find **PesePay Transactions & Reports** and click **Activate**.
+2. Click **Configure**, tick the admin roles that may see payment data (for example Full Administrator only), and choose whether to allow **CSV exports** and the read-only **Check status with PesePay** button.
+3. Open it under **Addons > PesePay Transactions & Reports**.
+
+### 8. Test, then switch to live
+
+Do a small real payment as described in [Going live](#going-live) before telling clients about the new payment option.
+
+## Test mode
+
+Test mode sends payments to PesePay's sandbox using **test keys**. No real money moves, but **invoices are marked Paid** (transaction IDs start with `PesePay-TEST-`), so the whole flow can be checked on a test copy of WHMCS.
+
+- Only **EcoCash USD** exists in the sandbox. Use `0777777777` for a successful payment and `0770000000` for a failed one.
+- Clients see a "TEST MODE — no real money will be taken" notice. The reports addon keeps test payments under its **Test** view, never in live totals, and warns while Test mode is on.
+- **Never enable Test mode on the live site.** Anyone paying would get their invoice marked paid without being charged.
+- Keys belong to a mode. A payment made in one mode can only be checked again after switching back to that mode with its keys.
+
+## Going live
+
+1. Test mode **off**, live keys entered, only **EcoCash USD** enabled.
+2. Create a small invoice (for example USD 1.00) for your own client account, set its payment method to **PesePay Direct**, and pay it with your own EcoCash number.
+3. Check that the invoice turns **Paid** with a `PesePay-…` transaction, and that the payment appears under **Addons > PesePay Transactions & Reports** (Live view).
+4. Repeat with a small payment for each other wallet before enabling it: O'mari, PayGo and ZiG currencies. These can't be tested in the sandbox. **InnBucks** stays disabled until a real InnBucks response has been checked, because PesePay doesn't document its payment-code fields.
+5. Refund test payments, if needed, in the PesePay merchant panel. The module doesn't do refunds.
+
+## How the checkout works for clients
+
+On an unpaid invoice whose payment method is PesePay Direct, the client sees a **Pay with PesePay** box showing the **amount due**:
+
+1. If several wallets are enabled, they pick one from tappable tiles. With only one, it says "Paying with EcoCash".
+2. They enter their mobile number and press **Pay USD …**.
+3. They approve the prompt on their phone (O'mari: enter the SMS code; PayGo: scan or use the payment code).
+4. A spinner shows while the page checks the payment automatically. There is no "check status" button.
+5. Once PesePay confirms the payment, the invoice is marked paid, the page reloads and shows the invoice as **Paid**.
+
+Other outcomes:
+
+- **Declined or failed:** "Payment was not completed… You can start another payment." Nothing was charged and the invoice stays unpaid.
+- **Rejected by PesePay**, for example because of wrong keys: "Nothing was charged. You can try again."
+- **No confirmation from PesePay** after about two minutes: the client is told not to pay again and to contact support. See [Troubleshooting](#troubleshooting).
+
+Only the **account owner** of the invoice can pay it. Delegated users and guest payments are not supported in this version.
+
+### Manual payments (bank transfer and others)
+
+PesePay is one gateway among others. WHMCS's own **Payment Method** dropdown on the invoice switches between PesePay and manual methods such as bank transfer, and the PesePay box points clients to it. Manual payments recorded in admin work as usual. The PesePay box always charges only the **remaining balance**. If an invoice is somehow paid both manually and through PesePay, WHMCS records both and the excess becomes client credit. Check **Needs attention** in the reports addon before recording a manual payment on an invoice with a pending PesePay payment.
+
+## Reports addon
+
+**Addons > PesePay Transactions & Reports**, visible only to the admin roles you allow:
+
+- **Live / Test switch:** test payments are never mixed into live figures.
+- **Transactions:** every payment attempt with a status badge (Paid, Failed, Rejected, Pending, Needs attention), filtered by outcome, dates (UTC), wallet, currency, invoice or PesePay reference. Click an attempt for its details, links to the invoice and client, and the optional read-only status check.
+- **Reports:** amount collected and success rate per currency (currencies are never added together), a daily collections chart (also available as a table), and attempts and outcomes by wallet.
+- **Needs attention:** stale pending payments, uncertain statuses and attempts PesePay never acknowledged.
+- **Reconciliation:** unresolved payments across all dates, for live and test separately.
+- **Gateway settings:** whether Test mode is on, whether each key is set and valid (never the key itself), and which wallets are enabled.
+- **CSV export** of up to 5,000 filtered attempts. Never includes keys or phone numbers.
+
+Clients never see any of this. The addon has no client-area page, and its files return nothing when opened directly.
+
+## Troubleshooting
+
+PesePay's reason for every failure is written to **Billing > Gateway Log** (gateway "PesePay Direct"), with phone numbers masked.
+
+| Gateway log says | Meaning and fix |
+|---|---|
+| `HTTP 404: Integration key record was not found` | The key isn't valid for this mode. Usually test keys are being used with Test mode off. Enter the application's live keys, or turn Test mode on for test keys. |
+| `Payment request rejected by PesePay` | PesePay refused the request, so no payment was created. The reason follows. The client can try again. |
+| `Initiation requires reconciliation` | PesePay's reply couldn't be confirmed. The background job keeps checking. If the attempt has no PesePay reference, see below. |
+| `Reconciliation deferred` | The background job couldn't check a payment, for example because of missing keys or a mode switch. It retries automatically. |
+
+**An invoice is stuck with "contact support".** PesePay never returned a reference for the last attempt, so a new payment is blocked to avoid charging twice. Check the PesePay merchant panel for that invoice. If no payment was taken, open the attempt under **Addons > PesePay Transactions & Reports > Needs attention**, tick "I checked the PesePay merchant panel…" and click **Clear attempt**. The client can then pay again. Never mark an unknown payment as paid by hand.
+
+**Payments stay pending.** Check that the cron job runs (its log file should update every minute) and that the server can reach `api.pesepay.com` over HTTPS.
+
+## Payment recording and safety
+
+- A payment request is saved before PesePay is called, and repeated clicks reuse it, so double clicks and page reloads can't charge twice.
+- Callbacks only trigger a check. The module then asks PesePay for the status itself and verifies the reference, amount, currency and callback address before recording anything. Only a verified `SUCCESS` marks an invoice paid.
+- Per-invoice locks stop two processes from recording the same payment. WHMCS's ledger is checked for the transaction ID first, so a payment is never recorded twice.
+- If PesePay's answer is ambiguous (timeout, server error, no reference), the module does **not** retry the charge. The background job keeps checking, and an administrator can clear an attempt PesePay never acknowledged.
+- PesePay's sandbox can return an empty `referenceNumber`. The reference is then taken from its `pollUrl`, but only when that URL is on PesePay's own API host, and the URL itself is never fetched.
+- Logs contain attempt IDs, fixed event messages and PesePay's sanitized error text. They never contain keys, OTPs, phone numbers or raw payloads.
+- No refunds, recurring charges or card payments. Cards need PesePay's hosted or embedded checkout, which this module doesn't use.
 
 ## Payment methods
 
-- EcoCash: USD and ZiG; phone approval, including instructions from PesePay's current catalogue.
-- O'mari: USD and ZiG; phone number followed by a six-digit OTP, submitted once from the server.
-- PayGo: ZiG; displays the documented QR image and payment code.
-- InnBucks: USD; adapter is present but **unverified and disabled by default**. PesePay's InnBucks page does not document its response metadata keys. Confirm a genuine response and adjust the adapter before enabling it. The current renderer understands the documented `qrCode` and `qrCodeUrl` metadata used by PayGo; do not assume InnBucks returns these fields.
+| Wallet | Currencies | Client action | Default |
+|---|---|---|---|
+| EcoCash | USD, ZiG | Approve on phone | USD on |
+| O'mari | USD, ZiG | Phone number, then 6-digit SMS code | off |
+| PayGo | ZiG | Scan QR / use payment code | off |
+| InnBucks | USD | Payment code | off — unverified |
 
-Only EcoCash USD is enabled by default. Production methods are filtered against PesePay's live catalogue and amount limits. Card methods are excluded even if the catalogue says they do not require redirects: the Direct API documentation says cards require Hosted or Embedded checkout. The sandbox supports only EcoCash USD among these wallet methods.
+Live wallets are also filtered against PesePay's current catalogue and amount limits. ZiG invoices are sent as `ZiG` for EcoCash and PayGo, and as `ZWG` for O'mari. No exchange-rate conversion is done, and the invoice's own currency and balance are always used. Don't set up WHMCS currency conversion for this gateway.
 
-ZiG is mapped explicitly: EcoCash and PayGo use `ZiG`, while O'mari uses `ZWG`. No exchange-rate conversion is performed. Unsupported currencies are rejected.
+## Development
 
-## Runtime requirements and current limits
-
-- Target: WHMCS 8+ with PHP 8.1+, cURL, OpenSSL and PDO MySQL. PHP 8.3 and MySQL 8.0 were used locally. Exact compatibility with the installed WHMCS release is still a staging test, not an established result.
-- HTTPS WHMCS System URL, outbound HTTPS to PesePay and a publicly reachable callback endpoint on the staging installation.
-- MySQL advisory locks (`GET_LOCK`) and permission to create the module's InnoDB table. An authenticated owner request creates the table when it is absent; the CLI installer can create it beforehand.
-- **Account owners only in this candidate.** Delegated users are rejected until their invoice-permission adapter is validated against the installed WHMCS version. Guest invoice payments are not supported.
-- No recurring capture, automatic refunds, subscription cancellation or split-settlement applications. These capabilities are not advertised by the module. Handle any refunds in the provider portal and reconcile WHMCS separately.
-- No automatic charge retry for an ambiguous network/API result. An attempt without a reference needs merchant-panel/support reconciliation. Do not delete it or change it to failed merely to enable another charge.
-- Amounts are represented as integer minor units and must have at most two meaningful decimal places.
-
-## Staging installation
-
-1. Create a licensed, isolated WHMCS staging installation with synthetic clients and invoices. Disable outbound customer email and provisioning there. Do not clone live client data just to test this gateway.
-2. Extract only the `modules/` directory from the release ZIP into that staging installation. This adds a new module and does not replace Payzw.
-3. Configure the sandbox credentials in the administrator payment-gateway settings, leaving the environment on Sandbox. Restrict gateway visibility during setup.
-4. Install the table if desired:
-
-   ```sh
-   php /path/to/staging-whmcs/modules/gateways/pesepaydirect/reconcile.php --install
-   ```
-
-5. Schedule reconciliation every minute using the staging host's PHP executable:
-
-   ```cron
-   * * * * * /usr/bin/php /path/to/staging-whmcs/modules/gateways/pesepaydirect/reconcile.php >> /path/outside/public_html/pesepay-reconcile.log 2>&1
-   ```
-
-   Keep the log outside the web root. The worker prevents overlapping runs, processes up to 20 due attempts per run and stops starting additional work after approximately 50 seconds. A single pending request may extend that time by its HTTP timeout. Monitor deferred attempts and queue size as volume grows.
-
-6. Verify callback authorization headers reach PHP. Callbacks are queued durably and acknowledged; the worker or authenticated checkout polling then verifies the result with PesePay. The browser need not stay open.
-7. Exercise sandbox success and failure, refresh/reload, duplicate clicks, missed callbacks, repeated callbacks, session expiry and an interrupted network request. A sandbox success should display confirmation without changing the WHMCS invoice ledger.
-8. Use an isolated test merchant/application and obtain explicit authorization for any later small-value production-provider transactions needed to test the other wallets. Do not activate production customer checkout as part of this step.
-
-## Payment recording and recovery
-
-A charge request is saved before the HTTP call. Repeated submissions reuse the saved request or active attempt. The callback body is only a notification: its status, amount and URLs are not used to credit invoices. The server fetches status from a fixed PesePay API host and verifies reference, original callback URL, amount and currency. Only a verified `SUCCESS` can record a production payment.
-
-Invoice advisory locks serialize initiation and reconciliation. The WHMCS ledger is checked for the gateway transaction ID before adding payment, so a retry can recover when the ledger write succeeded but the module's completion update failed. This prevents duplicate accounting entries through this module; it does not claim that arbitrary third-party WHMCS provisioning hooks are atomic across process failures.
-
-`PARTIALLY_PAID` remains pending. Unknown statuses remain unsettled. `FAILED`, `TIME_OUT`, `ERROR` and `SERVICE_UNAVAILABLE` block a new charge pending reconciliation. Clear final declines permit a customer-initiated new attempt. Pending and uncertain attempts continue to be checked; clearly declined attempts are not repeatedly polled unless another callback queues them.
-
-Support logs contain attempt IDs and fixed event messages, not phone numbers, keys, OTPs or raw provider payloads. Query `mod_pesepaydirect_attempts` through authorized administration to investigate a specific invoice. Never manually set `credited=1` to resolve an unknown payment.
-
-## Verification
-
-Local checks completed:
-
-- 11 PHP tests for the reports addon and key validation: outcome classification, per-currency totals, environment separation, CSV formula neutralisation, output escaping, CSRF and option gating, and key status shown without values.
-- 25 PHP tests with a separate MySQL database, including concurrent workers, duplicate callbacks, interrupted settlement, request idempotency, amount/currency/reference mismatch, OTP timeout, sandbox isolation, encryption interoperability and failed provider responses.
-- Authentication/CSRF/output checks for guests, account owners, delegated users and escaped checkout markup.
-- 5 DOM-based JavaScript tests for double clicks, lost-response recovery, sandbox messaging, unsafe metadata and single-use OTP submission.
-- PHP and JavaScript syntax checks.
-
-These use a mocked PesePay transport and WHMCS boundary adapters. They do not substitute for staging WHMCS tests. A real sandbox call was attempted separately and returned HTTP 500. No successful real sandbox payment or callback delivery has been established.
-
-Development test commands (only against an isolated database named `pesepay_test`):
+Tests use mocked PesePay and WHMCS boundaries and an isolated MySQL database. **Never point them at a WHMCS database**, because they truncate their tables.
 
 ```sh
-PESEPAY_TEST_DSN='mysql:unix_socket=/path/to/test-mysql.sock;dbname=pesepay_test' php tests/run.php
-php tests/auth.php
-PESEPAY_TEST_DSN='mysql:unix_socket=/path/to/test-mysql.sock;dbname=pesepay_test' php tests/reports.php
-npm ci --ignore-scripts
-npm run test:ui
+export PESEPAY_TEST_DSN='mysql:unix_socket=/path/to/test-mysql.sock;dbname=pesepay_test'
+php tests/run.php        # 30 gateway tests
+php tests/reports.php    # 13 reports addon tests
+php tests/auth.php       # login, CSRF, escaping, settings
+npm ci --ignore-scripts && npm run test:ui   # 13 checkout UI tests (jsdom)
 ```
 
-The PHP tests truncate their module/test tables. Never point them at a WHMCS database. Node and jsdom are development dependencies only, not production requirements.
+To build a release ZIP, archive the `modules/` folder and this README. Node and jsdom are only used for tests.
 
 ## References
 
-Reviewed on 22 November 2026:
-
-- https://developers.pesepay.com/payments/direct-api/
-- https://developers.pesepay.com/api/make-payment/
-- https://developers.pesepay.com/api/check-payment-status/
-- https://developers.pesepay.com/security/encryption/
-- https://developers.pesepay.com/webhooks/result-callback/
-- https://developers.pesepay.com/webhooks/verifying-callbacks/
-- https://developers.pesepay.com/payment-methods/omari/
-- https://developers.pesepay.com/payment-methods/paygo/
-- https://developers.pesepay.com/testing/
-- https://developers.whmcs.com/payment-gateways/callbacks/
-- https://developers.whmcs.com/advanced/authentication/
+- PesePay: [Direct API](https://developers.pesepay.com/payments/direct-api/), [Make Payment](https://developers.pesepay.com/api/make-payment/), [Check Payment Status](https://developers.pesepay.com/api/check-payment-status/), [Encryption](https://developers.pesepay.com/security/encryption/), [Result callback](https://developers.pesepay.com/webhooks/result-callback/), [Verifying callbacks](https://developers.pesepay.com/webhooks/verifying-callbacks/), [Testing](https://developers.pesepay.com/testing/)
+- PesePay's official PHP SDK, [`codevirtus/pesepay`](https://github.com/codevirtus/pesepay-php) 1.0.3, used as a reference for headers and request fields
+- WHMCS: [Payment gateways](https://developers.whmcs.com/payment-gateways/), [Addon modules](https://developers.whmcs.com/addon-modules/)

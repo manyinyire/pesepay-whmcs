@@ -11,6 +11,13 @@ if (!$lock || !flock($lock,LOCK_EX | LOCK_NB)) { exit(0); }
 $started=time();
 $store=store(); ensureInstalled($store);
 if (in_array('--install',$argv,true)) { echo "PesePay Direct schema ready.\n"; exit; }
+if (in_array('--activate',$argv,true)) {
+    // WHMCS 9 may not list custom gateways on Setup > Payment Gateways; this activates it the same way that screen would.
+    $gateway=new \WHMCS\Module\Gateway(); $gateway->load('pesepaydirect');
+    if ($gateway->isActiveGateway('pesepaydirect')) { echo "PesePay Direct is already active.\n"; exit; }
+    $gateway->activate();
+    echo "PesePay Direct activated. Enter its keys under Setup > Payment Gateways > Manage Existing Gateways.\n"; exit;
+}
 $errors=0;
 // Only the current mode's attempts can be verified with the keys entered.
 foreach ($store->due(config()['environment']) as $a) {
