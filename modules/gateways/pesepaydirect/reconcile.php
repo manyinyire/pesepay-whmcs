@@ -18,9 +18,11 @@ if (in_array('--activate',$argv,true)) {
     $gateway->activate();
     echo "PesePay Direct activated. Enter its keys under Setup > Payment Gateways > Manage Existing Gateways.\n"; exit;
 }
+// Not activated or no keys yet: nothing can be checked, so wait quietly rather than fail every minute.
+try { $environment=config()['environment']; } catch (\RuntimeException $e) { echo 'PesePay Direct idle: '.$e->getMessage()."\n"; exit(0); }
 $errors=0;
 // Only the current mode's attempts can be verified with the keys entered.
-foreach ($store->due(config()['environment']) as $a) {
+foreach ($store->due($environment) as $a) {
     if (time()-$started>50) { break; }
     try {
         $result=service($store,config($a['environment']))->refresh((int)$a['id'],true);
